@@ -8,12 +8,19 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const users = {};
+
+// Takes a room id and returns an array of users in that room
+// io.sockets.adapter.rooms.get(roomId): This retrieves all the socketIds of the users currently connected to the room with the specified roomId.
+// The io.sockets.adapter.rooms object holds information about all the rooms and the socketIds of the users in those rooms.
 const getAllUsersInRoom = (roomId) => {
   return Array.from(io.sockets.adapter.rooms.get(roomId) || []).map(
     (socketId) => {
       return {
         socketId,
-        username: users[socketId],
+        user: {
+          theme: users[socketId].theme,
+          username: users[socketId].username,
+        },
       };
     }
   );
@@ -22,16 +29,21 @@ const getAllUsersInRoom = (roomId) => {
 io.on('connection', (currentSocket) => {
   currentSocket.on(EVENTS.JOIN, ({
     roomId,
+    theme,
     username,
   }) => {
-    users[currentSocket.id] = username;
+    users[currentSocket.id] = {
+      theme,
+      username,
+    };
     currentSocket.join(roomId);
     const editors = getAllUsersInRoom(roomId);
+
     editors.forEach((editor) => {
       io.to(editor.socketId).emit(EVENTS.JOINED, {
         editors,
         socketId: currentSocket.id,
-        username,
+        user: users[currentSocket.id],
       });
     });
   });
@@ -44,12 +56,26 @@ io.on('connection', (currentSocket) => {
     io.to(socketId).emit(EVENTS.CODE_CHANGE, { code });
   });
 
+  currentSocket.on(EVENTS.CURSOR_POSITION_CHANGE, ({
+    cursor,
+    cursorCoords,
+    roomId,
+  }) => {
+    const user = users[currentSocket.id];
+    currentSocket.in(roomId).emit(EVENTS.CURSOR_POSITION_CHANGE, {
+      cursor,
+      cursorCoords,
+      socketId: currentSocket.id,
+      user,
+    });
+  });
+
   currentSocket.on('disconnecting', () => {
-    const rooms = [...currentSocket.rooms];
+    const rooms = Array.from(currentSocket.rooms);
     rooms.forEach((roomId) => {
       currentSocket.in(roomId).emit(EVENTS.DISCONNECTED, {
         socketId: currentSocket.id,
-        username: users[currentSocket.id],
+        user: users[currentSocket.id],
       });
     });
 
